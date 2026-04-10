@@ -61,8 +61,18 @@ static char convert_utf8(unsigned char *buf, ssize_t *i)
 
 	if (c == 0xE2)
 	{
+		unsigned char c2 = buf[*i + 1];
+		unsigned char c3 = buf[*i + 2];
+
 		*i += 3;
-		return '#';
+
+		if (c2 == 0x96 && c3 == 0x91) /* ░ */
+			return '#';
+
+		if (c2 == 0x96 && c3 == 0x9A) /* ▚ */
+			return '%';
+
+		return '?';
 	}
 
 	if (c == 0xF0)
