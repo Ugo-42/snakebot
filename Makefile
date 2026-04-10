@@ -13,12 +13,13 @@ OBJS = $(addprefix $(OBJ_DIR)/, $(OBJ))
 
 CC = cc
 CFLAGS = -Wall -Wextra -Werror -O2 -I$(INC_DIR)
+LIBS = -lX11 -lXtst
 
 all: $(BIN_DIR)/$(NAME)
 
 $(BIN_DIR)/$(NAME): $(OBJS)
 	@mkdir -p $(BIN_DIR)
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
 
 $(OBJ_DIR)/%.o: $(SRC_DIR)/%.c
 	@mkdir -p $(OBJ_DIR)
