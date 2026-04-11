@@ -33,6 +33,12 @@ static void send_key(char k)
 static int hx, hy;
 static int ax, ay;
 
+/* ---------------- PATH BUFFER ---------------- */
+
+static char path[H * W];
+static int path_len = 0;
+static int path_i = 0;
+
 /* ---------------- BFS ---------------- */
 
 typedef struct s_node {
@@ -47,21 +53,15 @@ static int dy[4] = {0, 0, 1, -1};
 
 static int is_blocked(char c)
 {
-    if (c == '#')
-        return 1;
-    if (c == '%')
-        return 1;
-    return 0;
+    return (c == '#' || c == '%');
 }
 
-/* ---------------- HEAD / APPLE ---------------- */
+/* ---------------- FIND ---------------- */
 
 static int find_head(char f[H][W])
 {
     for (int y = 0; y < H; y++)
-    {
         for (int x = 0; x < W; x++)
-        {
             if (f[y][x] == '^' || f[y][x] == 'v' ||
                 f[y][x] == '<' || f[y][x] == '>')
             {
@@ -69,31 +69,25 @@ static int find_head(char f[H][W])
                 hy = y;
                 return 1;
             }
-        }
-    }
     return 0;
 }
 
 static int find_apple(char f[H][W])
 {
     for (int y = 0; y < H; y++)
-    {
         for (int x = 0; x < W; x++)
-        {
             if (f[y][x] == '@')
             {
                 ax = x;
                 ay = y;
                 return 1;
             }
-        }
-    }
     return 0;
 }
 
-/* ---------------- BFS SEARCH ---------------- */
+/* ---------------- BFS (FULL PATH) ---------------- */
 
-static char bfs(char f[H][W])
+static int bfs(char f[H][W], char *out)
 {
     int qx[H * W];
     int qy[H * W];
@@ -112,23 +106,29 @@ static char bfs(char f[H][W])
 
         if (x == ax && y == ay)
         {
-            /* reconstruct first step */
-            int cx = x;
-            int cy = y;
+            int len = 0;
 
-            while (!(parent[cy][cx].x == hx &&
-                     parent[cy][cx].y == hy))
+            while (!(x == hx && y == hy))
             {
-                int px = parent[cy][cx].x;
-                int py = parent[cy][cx].y;
-                cx = px;
-                cy = py;
+                node_t p = parent[y][x];
+
+                if (x > p.x) out[len++] = 'd';
+                else if (x < p.x) out[len++] = 'a';
+                else if (y > p.y) out[len++] = 's';
+                else out[len++] = 'w';
+
+                x = p.x;
+                y = p.y;
             }
 
-            if (cx > hx) return 'd';
-            if (cx < hx) return 'a';
-            if (cy > hy) return 's';
-            return 'w';
+            for (int i = 0; i < len / 2; i++)
+            {
+                char t = out[i];
+                out[i] = out[len - 1 - i];
+                out[len - 1 - i] = t;
+            }
+
+            return len;
         }
 
         for (int i = 0; i < 4; i++)
@@ -146,20 +146,19 @@ static char bfs(char f[H][W])
                 continue;
 
             visited[ny][nx] = 1;
-            parent[ny][nx].x = x;
-            parent[ny][nx].y = y;
+            parent[ny][nx] = (node_t){x, y};
 
             qx[qt] = nx;
             qy[qt++] = ny;
         }
     }
 
-    /* fallback greedy */
-    if (ax > hx) return 'd';
-    if (ax < hx) return 'a';
-    if (ay > hy) return 's';
-    return 'w';
+    return 0;
 }
+
+/* ---------------- BOT LOOP STATE ---------------- */
+
+static int path_valid = 0;
 
 /* ---------------- MAIN UPDATE ---------------- */
 
@@ -170,7 +169,20 @@ void bot_update(char frame[H][W])
     if (!find_head(frame) || !find_apple(frame))
         return;
 
-    char move = bfs(frame);
+    /* refill path only when needed */
+    if (path_i >= path_len)
+    {
+        path_len = bfs(frame, path);
+        path_i = 0;
+        path_valid = (path_len > 0);
+    }
+
+    char move;
+
+    if (path_valid)
+        move = path[path_i++];
+    else
+        move = bfs(frame, path); /* fallback immediate recompute */
 
     send_key(move);
 }
