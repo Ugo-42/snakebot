@@ -19,17 +19,6 @@ static char dir_to_key(int d)
 	return "wdsa"[d];
 }
 
-/* ================= SAFETY ================= */
-
-static int is_safe(char f[H][W], int x, int y)
-{
-	if (x < 0 || y < 0 || x >= W || y >= H)
-		return 0;
-	if (f[y][x] == '#' || f[y][x] == '%')
-		return 0;
-	return 1;
-}
-
 /* ================= FINDERS ================= */
 
 static int find_head(char f[H][W])
@@ -67,37 +56,72 @@ static int find_apple(char f[H][W])
 	return 0;
 }
 
+static int can_move(char f[H][W], int x, int y)
+{
+	if (x < 0 || y < 0 || x >= W || y >= H)
+		return 0;
+	if (f[y][x] == '#' || f[y][x] == '%')
+		return 0;
+	return 1;
+}
+
 /* ================= CHOOSE DIRECTION ================= */
+
+static int valid_turn(char f[H][W], int cx, int cy, int d)
+{
+	int nx = cx + dx[d];
+	int ny = cy + dy[d];
+
+	if (!can_move(f, nx, ny))
+		return 0;
+
+	/* simulate step 1 forward */
+	cx = nx;
+	cy = ny;
+
+	/* after moving, ensure at least 1 valid continuation */
+	int free = 0;
+
+	for (int i = 0; i < 4; i++)
+	{
+		int nnx = cx + dx[i];
+		int nny = cy + dy[i];
+
+		if (can_move(f, nnx, nny))
+			free++;
+	}
+
+	/* must not enter dead 1-step pocket */
+	return free > 0;
+}
 
 static int choose_direction(char f[H][W])
 {
-	int best_dir = dir;
-	int best_score = -1000000;
+	int best = dir;
+	int best_dist = 100000;
 
 	for (int d = 0; d < 4; d++)
 	{
 		int nx = hx + dx[d];
 		int ny = hy + dy[d];
 
-		if (!is_safe(f, nx, ny))
+		if (!can_move(f, nx, ny))
+			continue;
+
+		/* CRITICAL FIX: 2-step validity check */
+		if (!valid_turn(f, hx, hy, d))
 			continue;
 
 		int dist = abs(nx - ax) + abs(ny - ay);
 
-		int score = -dist;
-
-		/* tie-break: prefer current direction */
-		if (d == dir)
-			score += 1;
-
-		if (score > best_score)
+		if (dist < best_dist)
 		{
-			best_score = score;
-			best_dir = d;
+			best_dist = dist;
+			best = d;
 		}
 	}
 
-	return best_dir;
+	return best;
 }
 
 /* ================= OUTPUT ================= */
