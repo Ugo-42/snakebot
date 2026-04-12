@@ -1,188 +1,137 @@
 #include "recorder.h"
-#include <X11/Xlib.h>
-#include <X11/extensions/XTest.h>
+#include <unistd.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
-/* ---------------- X11 ---------------- */
-
-static Display *dpy = NULL;
-
-static void init_x11(void)
-{
-    if (!dpy)
-        dpy = XOpenDisplay(NULL);
-}
-
-static void send_key(char k)
-{
-    if (!dpy)
-        return;
-
-    char keystr[2] = {k, 0};
-    KeyCode code = XKeysymToKeycode(dpy, XStringToKeysym(keystr));
-
-    XTestFakeKeyEvent(dpy, code, True, 0);
-    XTestFakeKeyEvent(dpy, code, False, 0);
-    XFlush(dpy);
-}
-
-/* ---------------- GAME STATE ---------------- */
+/* ---------------- STATE ---------------- */
 
 static int hx, hy;
 static int ax, ay;
-
-/* ---------------- PATH BUFFER ---------------- */
-
-static char path[H * W];
-static int path_len = 0;
-static int path_i = 0;
-
-/* ---------------- BFS ---------------- */
-
-typedef struct s_node {
-    int x, y;
-} node_t;
-
-static int visited[H][W];
-static node_t parent[H][W];
-
-static int dx[4] = {1, -1, 0, 0};
-static int dy[4] = {0, 0, 1, -1};
-
-static int is_blocked(char c)
-{
-    return (c == '#' || c == '%');
-}
+static int dir = 0;
 
 /* ---------------- FIND ---------------- */
 
 static int find_head(char f[H][W])
 {
-    for (int y = 0; y < H; y++)
-        for (int x = 0; x < W; x++)
-            if (f[y][x] == '^' || f[y][x] == 'v' ||
-                f[y][x] == '<' || f[y][x] == '>')
-            {
-                hx = x;
-                hy = y;
-                return 1;
-            }
-    return 0;
+	for (int y = 0; y < H; y++)
+		for (int x = 0; x < W; x++)
+			if (strchr("^v<>", f[y][x]))
+			{
+				hx = x;
+				hy = y;
+				return 1;
+			}
+	return 0;
 }
 
 static int find_apple(char f[H][W])
 {
-    for (int y = 0; y < H; y++)
-        for (int x = 0; x < W; x++)
-            if (f[y][x] == '@')
-            {
-                ax = x;
-                ay = y;
-                return 1;
-            }
-    return 0;
+	for (int y = 0; y < H; y++)
+		for (int x = 0; x < W; x++)
+			if (f[y][x] == '@')
+			{
+				ax = x;
+				ay = y;
+				return 1;
+			}
+	return 0;
 }
 
-/* ---------------- BFS (FULL PATH) ---------------- */
+/* ---------------- MOVE ---------------- */
 
-static int bfs(char f[H][W], char *out)
+static int dx[4] = {0, 1, 0, -1};
+static int dy[4] = {-1, 0, 1, 0};
+
+static char dir_to_key(int d)
 {
-    int qx[H * W];
-    int qy[H * W];
-    int qh = 0, qt = 0;
-
-    memset(visited, 0, sizeof(visited));
-
-    qx[qt] = hx;
-    qy[qt++] = hy;
-    visited[hy][hx] = 1;
-
-    while (qh < qt)
-    {
-        int x = qx[qh];
-        int y = qy[qh++];
-
-        if (x == ax && y == ay)
-        {
-            int len = 0;
-
-            while (!(x == hx && y == hy))
-            {
-                node_t p = parent[y][x];
-
-                if (x > p.x) out[len++] = 'd';
-                else if (x < p.x) out[len++] = 'a';
-                else if (y > p.y) out[len++] = 's';
-                else out[len++] = 'w';
-
-                x = p.x;
-                y = p.y;
-            }
-
-            for (int i = 0; i < len / 2; i++)
-            {
-                char t = out[i];
-                out[i] = out[len - 1 - i];
-                out[len - 1 - i] = t;
-            }
-
-            return len;
-        }
-
-        for (int i = 0; i < 4; i++)
-        {
-            int nx = x + dx[i];
-            int ny = y + dy[i];
-
-            if (nx < 0 || ny < 0 || nx >= W || ny >= H)
-                continue;
-
-            if (visited[ny][nx])
-                continue;
-
-            if (is_blocked(f[ny][nx]))
-                continue;
-
-            visited[ny][nx] = 1;
-            parent[ny][nx] = (node_t){x, y};
-
-            qx[qt] = nx;
-            qy[qt++] = ny;
-        }
-    }
-
-    return 0;
+	return "wdsa"[d];
 }
 
-/* ---------------- BOT LOOP STATE ---------------- */
-
-static int path_valid = 0;
-
-/* ---------------- MAIN UPDATE ---------------- */
-
-void bot_update(char frame[H][W])
+static int is_safe(char f[H][W], int x, int y)
 {
-    init_x11();
+	if (x < 0 || y < 0 || x >= W || y >= H)
+		return 0;
 
-    if (!find_head(frame) || !find_apple(frame))
-        return;
+	if (f[y][x] == '#' || f[y][x] == '%')
+		return 0;
 
-    /* refill path only when needed */
-    if (path_i >= path_len)
-    {
-        path_len = bfs(frame, path);
-        path_i = 0;
-        path_valid = (path_len > 0);
-    }
+	return 1;
+}
 
-    char move;
+/* ---------------- FLOOD FILL ---------------- */
 
-    if (path_valid)
-        move = path[path_i++];
-    else
-        move = bfs(frame, path); /* fallback immediate recompute */
+static int flood_fill(char f[H][W], int x, int y, int visited[H][W])
+{
+	if (!is_safe(f, x, y) || visited[y][x])
+		return 0;
 
-    send_key(move);
+	visited[y][x] = 1;
+
+	int size = 1;
+
+	for (int d = 0; d < 4; d++)
+		size += flood_fill(f, x + dx[d], y + dy[d], visited);
+
+	return size;
+}
+
+/* ---------------- SCORING ---------------- */
+
+static int score_dir(char f[H][W], int d)
+{
+	int nx = hx + dx[d];
+	int ny = hy + dy[d];
+
+	if (!is_safe(f, nx, ny))
+		return -100000;
+
+	int dist = abs(nx - ax) + abs(ny - ay);
+
+	int visited[H][W] = {0};
+	int space = flood_fill(f, nx, ny, visited);
+
+	return -dist + space;
+}
+
+/* ---------------- DECISION ---------------- */
+
+static int choose_direction(char f[H][W])
+{
+	int best = dir;
+	int best_score = -1000000;
+
+	for (int d = 0; d < 4; d++)
+	{
+		int score = score_dir(f, d);
+
+		if (d == dir)
+			score += 2;
+
+		if (score > best_score)
+		{
+			best_score = score;
+			best = d;
+		}
+	}
+
+	return best;
+}
+
+/* ---------------- OUTPUT ---------------- */
+
+static void send_key(int fd, char k)
+{
+	write(fd, &k, 1);
+}
+
+/* ---------------- MAIN ---------------- */
+
+void bot_update(int fd, char frame[H][W])
+{
+	if (!find_head(frame) || !find_apple(frame))
+		return;
+
+	dir = choose_direction(frame);
+
+	send_key(fd, dir_to_key(dir));
 }

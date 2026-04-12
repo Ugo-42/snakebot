@@ -12,6 +12,7 @@ OBJ = $(SRCS:.c=.o)
 OBJS = $(addprefix $(OBJ_DIR)/, $(OBJ))
 
 CC = cc
+ 
 CFLAGS = -Wall -Wextra -Werror -O2 -I$(INC_DIR)
 LIBS = -lX11 -lXtst
 
@@ -34,4 +35,4 @@ fclean: clean
 re: fclean all
 
 run: all
-	stdbuf -o0 -e0 ./$(BIN_DIR)/minisnake | ./$(BIN_DIR)/$(NAME)
+	./$(BIN_DIR)/$(NAME)
