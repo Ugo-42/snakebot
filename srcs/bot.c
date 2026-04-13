@@ -1,5 +1,7 @@
 #include "recorder.h"
 #include <unistd.h>
+#include <string.h>
+#include <limits.h>
 
 typedef struct {
     int dx;
@@ -18,96 +20,53 @@ static dir_t g_dir[4] = {
    BASIC VALIDATION
    ============================================================ */
 
-static int is_valid(int x, int y, char map[H][W])
+static int in_bounds(int x, int y)
 {
-    if (x < 0 || y < 0 || x >= W || y >= H)
+    return (x >= 0 && y >= 0 && x < W && y < H);
+}
+
+static int is_blocked(char c)
+{
+    return (c == '#' || c == '%');
+}
+
+static int is_valid(char map[H][W], int x, int y)
+{
+    if (!in_bounds(x, y))
         return 0;
-    if (map[y][x] == '#' || map[y][x] == '%')
-        return 0;
-    return 1;
+    return !is_blocked(map[y][x]);
 }
 
 /* ============================================================
-   BFS STRUCTURES
+   DISTANCE
    ============================================================ */
 
-typedef struct {
-    vec_t parent[H][W];
+static int manhattan(int x1, int y1, int x2, int y2)
+{
+    return (x1 > x2 ? x1 - x2 : x2 - x1)
+         + (y1 > y2 ? y1 - y2 : y2 - y1);
+}
+
+/* ============================================================
+   LOCAL FREEDOM (cheap flood approximation)
+   ============================================================ */
+
+static int local_space(char map[H][W], int sx, int sy)
+{
+    vec_t stack[64];
     char visited[H][W];
-} bfs_t;
+    int size = 0;
 
-/* ============================================================
-   BFS TO APPLE
-   ============================================================ */
+    memset(visited, 0, sizeof(visited));
 
-static int bfs(char map[H][W], vec_t start, vec_t goal, vec_t *next)
-{
-    vec_t q[H * W];
-    int qh = 0, qt = 0;
+    stack[size++] = (vec_t){sx, sy};
+    visited[sy][sx] = 1;
 
-    bfs_t ctx = {0};
-
-    q[qt++] = start;
-    ctx.visited[start.y][start.x] = 1;
-    ctx.parent[start.y][start.x] = (vec_t){-1, -1};
-
-    while (qh < qt)
-    {
-        vec_t cur = q[qh++];
-
-        if (cur.x == goal.x && cur.y == goal.y)
-            break;
-
-        for (int i = 0; i < 4; i++)
-        {
-            int nx = cur.x + g_dir[i].dx;
-            int ny = cur.y + g_dir[i].dy;
-
-            if (!is_valid(nx, ny, map))
-                continue;
-
-            if (ctx.visited[ny][nx])
-                continue;
-
-            ctx.visited[ny][nx] = 1;
-            ctx.parent[ny][nx] = cur;
-            q[qt++] = (vec_t){nx, ny};
-        }
-    }
-
-    if (!ctx.visited[goal.y][goal.x])
-        return 0;
-
-    vec_t cur = goal;
-
-    while (!(ctx.parent[cur.y][cur.x].x == start.x &&
-             ctx.parent[cur.y][cur.x].y == start.y))
-    {
-        cur = ctx.parent[cur.y][cur.x];
-    }
-
-    *next = cur;
-    return 1;
-}
-
-/* ============================================================
-   FLOOD FILL SAFETY CHECK
-   ============================================================ */
-
-static int flood_fill(char map[H][W], vec_t start)
-{
-    vec_t q[H * W];
-    char visited[H][W] = {0};
-
-    int qh = 0, qt = 0;
     int count = 0;
 
-    q[qt++] = start;
-    visited[start.y][start.x] = 1;
-
-    while (qh < qt)
+    while (size > 0 && count < 30)
     {
-        vec_t cur = q[qh++];
+        vec_t cur = stack[--size];
         count++;
 
         for (int i = 0; i < 4; i++)
@@ -115,104 +74,122 @@ static int flood_fill(char map[H][W], vec_t start)
             int nx = cur.x + g_dir[i].dx;
             int ny = cur.y + g_dir[i].dy;
 
-            if (!is_valid(nx, ny, map))
+            if (!is_valid(map, nx, ny))
                 continue;
-
             if (visited[ny][nx])
                 continue;
 
             visited[ny][nx] = 1;
-            q[qt++] = (vec_t){nx, ny};
+            stack[size++] = (vec_t){nx, ny};
         }
     }
+
     return count;
 }
 
 /* ============================================================
-   SIMPLE SNAKE LENGTH ESTIMATION
-   (fallback heuristic)
+   ADJACENCY (wall + body hugging)
    ============================================================ */
 
-static int estimate_len(char map[H][W])
+static int adjacency_bonus(char map[H][W], int x, int y)
 {
-    int len = 0;
+    int score = 0;
 
-    for (int y = 0; y < H; y++)
-        for (int x = 0; x < W; x++)
-            if (map[y][x] == '%' || map[y][x] == '^'
-                || map[y][x] == 'v' || map[y][x] == '<'
-                || map[y][x] == '>')
-                len++;
+    for (int i = 0; i < 4; i++)
+    {
+        int nx = x + g_dir[i].dx;
+        int ny = y + g_dir[i].dy;
 
-    return len;
+        if (!in_bounds(nx, ny))
+            continue;
+
+        char c = map[ny][nx];
+
+        if (c == '#')
+            score += 2;
+
+        if (c == '%' || c == '^' || c == 'v' || c == '<' || c == '>')
+            score += 3;
+    }
+    return score;
 }
 
 /* ============================================================
-   SAFETY RULE
+   MOVE SCORING
    ============================================================ */
 
-static int is_safe(char map[H][W], vec_t next)
+static int score_move(char map[H][W], vec_t head, vec_t apple, vec_t next)
 {
-    int space = flood_fill(map, next);
-    int len = estimate_len(map);
+    int old_dist = manhattan(head.x, head.y, apple.x, apple.y);
+    int new_dist = manhattan(next.x, next.y, apple.x, apple.y);
 
-    return space > len;
+    int score = 0;
+
+    /* 1. apple attraction */
+    score += (old_dist - new_dist) * 10;
+
+    /* 2. wall/body hugging */
+    score += adjacency_bonus(map, next.x, next.y) * 5;
+
+    /* 3. space viability */
+    int space = local_space(map, next.x, next.y);
+
+    // too small space = dangerous
+    score += space * 2;
+
+    if (space < 10)
+        score -= 50;
+
+    return score;
 }
 
 /* ============================================================
-   FALLBACK MOVE
+   DECISION LOOP
    ============================================================ */
 
-static int fallback_move(int fd, char map[H][W], vec_t head)
+static int best_move(int fd, char map[H][W], vec_t head, vec_t apple)
 {
+    int best_score = INT_MIN;
+    char best_cmd = 0;
+
     for (int i = 0; i < 4; i++)
     {
         int nx = head.x + g_dir[i].dx;
         int ny = head.y + g_dir[i].dy;
 
-        if (is_valid(nx, ny, map) &&
-            is_safe(map, (vec_t){nx, ny}))
+        if (!is_valid(map, nx, ny))
+            continue;
+
+        vec_t next = {nx, ny};
+
+        int s = score_move(map, head, apple, next);
+
+        if (s > best_score)
         {
-            write(fd, &g_dir[i].cmd, 1);
-            return 1;
+            best_score = s;
+            best_cmd = g_dir[i].cmd;
         }
+    }
+
+    if (best_cmd)
+    {
+        write(fd, &best_cmd, 1);
+        return 1;
     }
 
     return 0;
 }
 
 /* ============================================================
-   MAIN BOT LOOP
+   MAIN
    ============================================================ */
 
 void bot_update(int fd, char map[H][W])
 {
-    vec_t apple, head, next;
+    vec_t apple, head;
 
-	if (!recorder_get_apple(&apple) || !recorder_get_head(&head))
-		return;
-
-    if (!bfs(map, head, apple, &next))
-    {
-        fallback_move(fd, map, head);
+    if (!recorder_get_apple(&apple) || !recorder_get_head(&head))
         return;
-    }
 
-    if (!is_safe(map, next))
-    {
-        fallback_move(fd, map, head);
-        return;
-    }
-
-    for (int i = 0; i < 4; i++)
-    {
-        if (head.x + g_dir[i].dx == next.x &&
-            head.y + g_dir[i].dy == next.y)
-        {
-            write(fd, &g_dir[i].cmd, 1);
-            return;
-        }
-    }
-
-    fallback_move(fd, map, head);
+    best_move(fd, map, head, apple);
 }
