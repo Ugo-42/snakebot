@@ -44,9 +44,9 @@ static void handle_prompts(int fd)
 {
 	if (state == ST_MENU && memmem(history, hlen, "(y/n)", 5))
 	{
-		#if UBUNTU
-			write(fd, "n\n", 2);
-		#endif
+#if UBUNTU
+		write(fd, "n\n", 2);
+#endif
 		write(fd, "y\n", 2);
 		state = ST_START;
 	}
@@ -82,6 +82,28 @@ static void set_raw_mode(int fd)
 
 /* ---------- MAIN ---------- */
 
+#if DEBUG
+#define RENDER(frame, buf, n) print_frame(frame)
+
+static void print_frame(char frame[H][W])
+{
+	char line[W + 1];
+
+	write(STDOUT_FILENO, "\033[H\033[J", 6);
+
+	for (int y = 0; y < H; y++)
+	{
+		for (int x = 0; x < W; x++)
+			line[x] = frame[y][x];
+		line[W] = '\n';
+
+		write(STDOUT_FILENO, line, W + 1);
+	}
+}
+#else
+#define RENDER(frame, buf, n) write(STDOUT_FILENO, buf, n)
+#endif
+
 int main(void)
 {
 	int master_fd;
@@ -114,8 +136,6 @@ int main(void)
 		if (n <= 0)
 			break;
 
-		write(STDOUT_FILENO, buf, n);
-
 		update_history(buf, n);
 		handle_prompts(master_fd);
 
@@ -123,6 +143,7 @@ int main(void)
 
 		if (state == ST_GAME && recorder_frame_ready())
 		{
+			RENDER(frame, buf, n);
 			recorder_consume_frame(frame);
 			bot_update(master_fd, frame);
 		}

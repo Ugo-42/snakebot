@@ -69,8 +69,11 @@ static char convert_utf8(unsigned char *buf, ssize_t *i)
 		if (c2 == 0x96 && c3 == 0x91) /* ░ */
 			return '#';
 
-		if (c2 == 0x96 && c3 == 0x9A) /* ▚ */
-			return '%';
+		if (c2 == 0x96) /* ▚ */
+		{
+			if (c3 >= 0x90 && c3 <= 0x9F)
+				return '%';
+		}
 
 		return '?';
 	}
@@ -173,13 +176,13 @@ int is_valid_frame(void)
 
 int recorder_frame_ready(void)
 {
-    if (!is_valid_frame())
-        return 0;
+	if (!is_valid_frame())
+		return 0;
 
-    if (!recording)
-        recording = 1;
+	if (!recording)
+		recording = 1;
 
-    return recording;
+	return recording;
 }
 
 void recorder_consume_frame(char out[H][W])

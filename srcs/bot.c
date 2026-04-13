@@ -28,7 +28,7 @@ static int find_head(char f[H][W])
 		for (int x = 0; x < W; x++)
 		{
 			if (f[y][x] == '^' || f[y][x] == 'v'
-				|| f[y][x] == '<' || f[y][x] == '>')
+					|| f[y][x] == '<' || f[y][x] == '>')
 			{
 				hx = x;
 				hy = y;
@@ -67,34 +67,6 @@ static int can_move(char f[H][W], int x, int y)
 
 /* ================= CHOOSE DIRECTION ================= */
 
-static int valid_turn(char f[H][W], int cx, int cy, int d)
-{
-	int nx = cx + dx[d];
-	int ny = cy + dy[d];
-
-	if (!can_move(f, nx, ny))
-		return 0;
-
-	/* simulate step 1 forward */
-	cx = nx;
-	cy = ny;
-
-	/* after moving, ensure at least 1 valid continuation */
-	int free = 0;
-
-	for (int i = 0; i < 4; i++)
-	{
-		int nnx = cx + dx[i];
-		int nny = cy + dy[i];
-
-		if (can_move(f, nnx, nny))
-			free++;
-	}
-
-	/* must not enter dead 1-step pocket */
-	return free > 0;
-}
-
 static int choose_direction(char f[H][W])
 {
 	int best = dir;
@@ -106,10 +78,6 @@ static int choose_direction(char f[H][W])
 		int ny = hy + dy[d];
 
 		if (!can_move(f, nx, ny))
-			continue;
-
-		/* CRITICAL FIX: 2-step validity check */
-		if (!valid_turn(f, hx, hy, d))
 			continue;
 
 		int dist = abs(nx - ax) + abs(ny - ay);

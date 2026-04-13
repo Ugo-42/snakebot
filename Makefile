@@ -25,6 +25,9 @@ PRELOAD_SO = $(PRELOAD_DIR)/preload.so
 
 all: $(BIN_DIR)/$(NAME)
 
+debug: CFLAGS += -DDEBUG
+debug: fclean all
+
 $(BIN_DIR)/$(NAME): $(OBJS)
 	@mkdir -p $(BIN_DIR)
 	$(CC) $(CFLAGS) -o $@ $^ $(LIBS)
