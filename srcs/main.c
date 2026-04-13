@@ -44,6 +44,9 @@ static void handle_prompts(int fd)
 {
 	if (state == ST_MENU && memmem(history, hlen, "(y/n)", 5))
 	{
+		#if UBUNTU
+			write(fd, "n\n", 2);
+		#endif
 		write(fd, "y\n", 2);
 		state = ST_START;
 	}
