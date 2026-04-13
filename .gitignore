@@ -1,5 +1,7 @@
 bin/snakebot
 
+auto.sh
+
 preload/preload.so
 
 objs/**
