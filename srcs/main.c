@@ -59,7 +59,7 @@ static void handle_prompts(int fd)
 	else if (state == ST_GAME && memmem(history, hlen, "GAME OVER", 9))
 	{
 		state = ST_DEAD;
-		write(fd, "UgoBot\n", 9);
+		write(fd, "UgoBot\n", 7);
 		write(fd, "n\n", 2);
 	}
 }
@@ -83,8 +83,6 @@ static void set_raw_mode(int fd)
 /* ---------- MAIN ---------- */
 
 #if DEBUG
-#define RENDER(frame, buf, n) print_frame(frame)
-
 static void print_frame(char frame[H][W])
 {
 	char line[W + 1];
@@ -100,8 +98,6 @@ static void print_frame(char frame[H][W])
 		write(STDOUT_FILENO, line, W + 1);
 	}
 }
-#else
-#define RENDER(frame, buf, n) write(STDOUT_FILENO, buf, n)
 #endif
 
 int main(void)
@@ -136,6 +132,9 @@ int main(void)
 		if (n <= 0)
 			break;
 
+		#if !DEBUG
+			write(STDOUT_FILENO, buf, n);
+		#endif
 		update_history(buf, n);
 		handle_prompts(master_fd);
 
@@ -143,7 +142,9 @@ int main(void)
 
 		if (state == ST_GAME && recorder_frame_ready())
 		{
-			RENDER(frame, buf, n);
+			#if DEBUG
+				print_frame(frame);
+			#endif
 			recorder_consume_frame(frame);
 			bot_update(master_fd, frame);
 		}
