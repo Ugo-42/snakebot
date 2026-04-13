@@ -185,7 +185,7 @@ void recorder_feed(unsigned char *buf, ssize_t n)
 		{
 			grid[cy][cx] = outc;
 
-			if (outc == '^' || outc == 'v' || outc == '<' || outc == '>')
+			if (outc == '^' || outc == 'v' || outc == '<' || outc == '>' || outc == 'X')
 			{
 				hx = cx;
 				hy = cy;

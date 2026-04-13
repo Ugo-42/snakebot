@@ -70,7 +70,6 @@ static void handle_prompts(int fd)
 	else if (state == ST_START && memmem(history, hlen, "Press ENTER", 11))
 	{
 		write(fd, "\n", 1);
-		write(fd, "w", 1);
 		state = ST_GAME;
 	}
 	else if (state == ST_GAME && memmem(history, hlen, "GAME OVER", 9))
