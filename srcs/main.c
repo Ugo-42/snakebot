@@ -59,7 +59,7 @@ static void handle_prompts(int fd)
 	else if (state == ST_GAME && memmem(history, hlen, "GAME OVER", 9))
 	{
 		state = ST_DEAD;
-		write(fd, "SnakeBot\n", 9);
+		write(fd, "UgoBot\n", 9);
 		write(fd, "n\n", 2);
 	}
 }
