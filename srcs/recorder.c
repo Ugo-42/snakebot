@@ -9,6 +9,10 @@ static char grid[H][W];
 static int cx = 0;
 static int cy = 0;
 
+/* pos */
+static int hx = -1, hy = -1;
+static int ax = -1, ay = -1;
+
 /* escape parsing */
 static int in_esc = 0;
 static char esc[128];
@@ -28,6 +32,24 @@ static void clear_grid(void)
 			grid[y][x] = ' ';
 }
 
+int recorder_get_head(vec_t *head)
+{
+	if (hx < 0 || hy < 0)
+		return 0;
+	head->x = hx;
+	head->y = hy;
+	return 1;
+}
+
+int recorder_get_apple(vec_t *apple)
+{
+	if (ax < 0 || ay < 0)
+		return 0;
+	apple->x = ax;
+	apple->y = ay;
+	return 1;
+}
+
 /* ---------- ANSI ---------- */
 
 static void handle_escape(void)
@@ -42,7 +64,11 @@ static void handle_escape(void)
 	}
 
 	if (strstr(esc, "[2J"))
+	{
 		clear_grid();
+		hx = hy = -1;
+		ax = ay = -1;
+	}
 
 	ei = 0;
 }
@@ -86,9 +112,10 @@ static char convert_utf8(unsigned char *buf, ssize_t *i)
 		if (c3 == 0xAB) { *i += 4; return 'v'; }
 		if (c3 == 0xA8) { *i += 4; return '<'; }
 		if (c3 == 0xAA) { *i += 4; return '>'; }
+		if (c3 == 0x8E) { *i += 4; return 'X'; }
 
 		*i += 4;
-		return 'X';
+		return '?';
 	}
 
 	(*i)++;
@@ -155,7 +182,21 @@ void recorder_feed(unsigned char *buf, ssize_t n)
 		}
 
 		if (cy >= 0 && cy < H && cx >= 0 && cx < W)
+		{
 			grid[cy][cx] = outc;
+
+			if (outc == '^' || outc == 'v' || outc == '<' || outc == '>')
+			{
+				hx = cx;
+				hy = cy;
+			}
+
+			if (outc == '@')
+			{
+				ax = cx;
+				ay = cy;
+			}
+		}
 
 		cx++;
 	}

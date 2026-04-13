@@ -1,187 +1,218 @@
 #include "recorder.h"
 #include <unistd.h>
-#include <string.h>
-#include <stdlib.h>
 
-/* ================= STATE ================= */
+typedef struct {
+    int dx;
+    int dy;
+    char cmd;
+} dir_t;
 
-static int hx, hy;
-static int ax, ay;
+static dir_t g_dir[4] = {
+    {0, -1, 'w'},
+    {0,  1, 's'},
+    {-1, 0, 'a'},
+    {1,  0, 'd'}
+};
 
-static int dir = 0;
+/* ============================================================
+   BASIC VALIDATION
+   ============================================================ */
 
-static int dx[4] = {0, 1, 0, -1};
-static int dy[4] = {-1, 0, 1, 0};
-
-static char dir_to_key(int d)
+static int is_valid(int x, int y, char map[H][W])
 {
-	return "wdsa"[d];
+    if (x < 0 || y < 0 || x >= W || y >= H)
+        return 0;
+    if (map[y][x] == '#' || map[y][x] == '%')
+        return 0;
+    return 1;
 }
 
-/* ================= FINDERS ================= */
+/* ============================================================
+   BFS STRUCTURES
+   ============================================================ */
 
-static int find_head(char f[H][W])
+typedef struct {
+    vec_t parent[H][W];
+    char visited[H][W];
+} bfs_t;
+
+/* ============================================================
+   BFS TO APPLE
+   ============================================================ */
+
+static int bfs(char map[H][W], vec_t start, vec_t goal, vec_t *next)
 {
-	for (int y = 0; y < H; y++)
-		for (int x = 0; x < W; x++)
-			if (f[y][x] == '^' || f[y][x] == 'v'
-				|| f[y][x] == '<' || f[y][x] == '>')
-			{
-				hx = x; hy = y;
-				return 1;
-			}
-	return 0;
+    vec_t q[H * W];
+    int qh = 0, qt = 0;
+
+    bfs_t ctx = {0};
+
+    q[qt++] = start;
+    ctx.visited[start.y][start.x] = 1;
+    ctx.parent[start.y][start.x] = (vec_t){-1, -1};
+
+    while (qh < qt)
+    {
+        vec_t cur = q[qh++];
+
+        if (cur.x == goal.x && cur.y == goal.y)
+            break;
+
+        for (int i = 0; i < 4; i++)
+        {
+            int nx = cur.x + g_dir[i].dx;
+            int ny = cur.y + g_dir[i].dy;
+
+            if (!is_valid(nx, ny, map))
+                continue;
+
+            if (ctx.visited[ny][nx])
+                continue;
+
+            ctx.visited[ny][nx] = 1;
+            ctx.parent[ny][nx] = cur;
+            q[qt++] = (vec_t){nx, ny};
+        }
+    }
+
+    if (!ctx.visited[goal.y][goal.x])
+        return 0;
+
+    vec_t cur = goal;
+
+    while (!(ctx.parent[cur.y][cur.x].x == start.x &&
+             ctx.parent[cur.y][cur.x].y == start.y))
+    {
+        cur = ctx.parent[cur.y][cur.x];
+    }
+
+    *next = cur;
+    return 1;
 }
 
-static int find_apple(char f[H][W])
+/* ============================================================
+   FLOOD FILL SAFETY CHECK
+   ============================================================ */
+
+static int flood_fill(char map[H][W], vec_t start)
 {
-	for (int y = 0; y < H; y++)
-		for (int x = 0; x < W; x++)
-			if (f[y][x] == '@')
-			{
-				ax = x; ay = y;
-				return 1;
-			}
-	return 0;
+    vec_t q[H * W];
+    char visited[H][W] = {0};
+
+    int qh = 0, qt = 0;
+    int count = 0;
+
+    q[qt++] = start;
+    visited[start.y][start.x] = 1;
+
+    while (qh < qt)
+    {
+        vec_t cur = q[qh++];
+        count++;
+
+        for (int i = 0; i < 4; i++)
+        {
+            int nx = cur.x + g_dir[i].dx;
+            int ny = cur.y + g_dir[i].dy;
+
+            if (!is_valid(nx, ny, map))
+                continue;
+
+            if (visited[ny][nx])
+                continue;
+
+            visited[ny][nx] = 1;
+            q[qt++] = (vec_t){nx, ny};
+        }
+    }
+    return count;
 }
 
-static int can_move(char f[H][W], int x, int y)
+/* ============================================================
+   SIMPLE SNAKE LENGTH ESTIMATION
+   (fallback heuristic)
+   ============================================================ */
+
+static int estimate_len(char map[H][W])
 {
-	if (x < 0 || y < 0 || x >= W || y >= H)
-		return 0;
-	if (f[y][x] == '#' || f[y][x] == '%')
-		return 0;
-	return 1;
+    int len = 0;
+
+    for (int y = 0; y < H; y++)
+        for (int x = 0; x < W; x++)
+            if (map[y][x] == '%' || map[y][x] == '^'
+                || map[y][x] == 'v' || map[y][x] == '<'
+                || map[y][x] == '>')
+                len++;
+
+    return len;
 }
 
-/* ================= FLOOD FILL ================= */
+/* ============================================================
+   SAFETY RULE
+   ============================================================ */
 
-static int flood(char f[H][W], int sx, int sy, int mark_tail)
+static int is_safe(char map[H][W], vec_t next)
 {
-	(void)mark_tail;
-	int vis[H][W];
-	memset(vis, 0, sizeof(vis));
+    int space = flood_fill(map, next);
+    int len = estimate_len(map);
 
-	int qx[H * W], qy[H * W];
-	int qh = 0, qt = 0;
-
-	qx[qt] = sx;
-	qy[qt] = sy;
-	qt++;
-	vis[sy][sx] = 1;
-
-	int count = 0;
-
-	while (qh < qt)
-	{
-		int x = qx[qh];
-		int y = qy[qh];
-		qh++;
-		count++;
-
-		for (int d = 0; d < 4; d++)
-		{
-			int nx = x + dx[d];
-			int ny = y + dy[d];
-
-			if (!can_move(f, nx, ny))
-				continue;
-			if (vis[ny][nx])
-				continue;
-
-			vis[ny][nx] = 1;
-			qx[qt] = nx;
-			qy[qt] = ny;
-			qt++;
-		}
-	}
-
-	return count;
+    return space > len;
 }
 
-/* ================= SIMULATION SAFETY ================= */
+/* ============================================================
+   FALLBACK MOVE
+   ============================================================ */
 
-static int safe_move(char f[H][W], int nx, int ny)
+static int fallback_move(int fd, char map[H][W], vec_t head)
 {
-	if (!can_move(f, nx, ny))
-		return 0;
+    for (int i = 0; i < 4; i++)
+    {
+        int nx = head.x + g_dir[i].dx;
+        int ny = head.y + g_dir[i].dy;
 
-	/* simulate occupancy */
-	char tmp[H][W];
-	memcpy(tmp, f, sizeof(tmp));
+        if (is_valid(nx, ny, map) &&
+            is_safe(map, (vec_t){nx, ny}))
+        {
+            write(fd, &g_dir[i].cmd, 1);
+            return 1;
+        }
+    }
 
-	tmp[hy][hx] = '#'; /* treat old head as body */
-	tmp[ny][nx] = '^';
-
-	/* flood from new head */
-	int space = flood(tmp, nx, ny, 0);
-
-	/* critical heuristic:
-	   must have enough space to not trap self */
-	if (space < 6)
-		return 0;
-
-	return 1;
+    return 0;
 }
 
-/* ================= CHOOSE MOVE ================= */
+/* ============================================================
+   MAIN BOT LOOP
+   ============================================================ */
 
-static int choose_direction(char f[H][W])
+void bot_update(int fd, char map[H][W])
 {
-	int best = dir;
-	int best_score = 1e9;
+    vec_t apple, head, next;
 
-	/* 1. try apple chase */
-	for (int d = 0; d < 4; d++)
-	{
-		int nx = hx + dx[d];
-		int ny = hy + dy[d];
-
-		if (!safe_move(f, nx, ny))
-			continue;
-
-		int dist = abs(nx - ax) + abs(ny - ay);
-
-		if (dist < best_score)
-		{
-			best_score = dist;
-			best = d;
-		}
-	}
-
-	/* 2. fallback: if no safe apple move → tail escape mode */
-	if (best_score == 1e9)
-	{
-		for (int d = 0; d < 4; d++)
-		{
-			int nx = hx + dx[d];
-			int ny = hy + dy[d];
-
-			if (can_move(f, nx, ny))
-			{
-				best = d;
-				break;
-			}
-		}
-	}
-
-	return best;
-}
-
-/* ================= OUTPUT ================= */
-
-static void send_key(int fd, char k)
-{
-	write(fd, &k, 1);
-}
-
-/* ================= MAIN ================= */
-
-void bot_update(int fd, char frame[H][W])
-{
-	if (!find_head(frame) || !find_apple(frame))
+	if (!recorder_get_apple(&apple) || !recorder_get_head(&head))
 		return;
 
-	dir = choose_direction(frame);
-	send_key(fd, dir_to_key(dir));
+    if (!bfs(map, head, apple, &next))
+    {
+        fallback_move(fd, map, head);
+        return;
+    }
+
+    if (!is_safe(map, next))
+    {
+        fallback_move(fd, map, head);
+        return;
+    }
+
+    for (int i = 0; i < 4; i++)
+    {
+        if (head.x + g_dir[i].dx == next.x &&
+            head.y + g_dir[i].dy == next.y)
+        {
+            write(fd, &g_dir[i].cmd, 1);
+            return;
+        }
+    }
+
+    fallback_move(fd, map, head);
 }
