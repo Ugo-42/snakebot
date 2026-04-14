@@ -6,6 +6,7 @@
 #include <sys/wait.h>
 #include <termios.h>
 #include <string.h>
+#include <fcntl.h>
 
 void bot_update(int fd, char frame[H][W]);
 
@@ -42,18 +43,35 @@ static void update_history(unsigned char *buf, size_t n)
 
 static int extract_score(void)
 {
-	for (ssize_t i = hlen - 6; i >= 0; i--)
+	for (ssize_t i = hlen - 1; i >= 0; i--)
 	{
-		if (memcmp(&history[i], "Score:", 6) == 0)
+		if (i >= 7 &&
+				history[i - 7] == '\033' &&
+				history[i - 6] == '[' &&
+				history[i - 5] == '2' &&
+				history[i - 4] == '3' &&
+				history[i - 3] == ';' &&
+				history[i - 2] == '8' &&
+				history[i - 1] == 'H')
 		{
-			char *p = &history[i + 6];
+			char *p = &history[i];
 
-			while (*p == ' ')
+			int value = 0;
+			int found = 0;
+
+			while ((size_t)(p - history) < hlen &&
+					*p >= '0' && *p <= '9')
+			{
+				value = value * 10 + (*p - '0');
 				p++;
+				found = 1;
+			}
 
-			return atoi(p);
+			if (found)
+				return value;
 		}
 	}
+
 	return -1;
 }
 
@@ -76,7 +94,7 @@ static void handle_prompts(int fd)
 	{
 		state = ST_DEAD;
 		if (extract_score() >= 900)
-			write(fd, "UgoBot\n", 7);
+			write(fd, "Bob\n", 4);
 		else
 			write(fd, "\n", 1);
 		write(fd, "n\n", 2);
@@ -165,7 +183,8 @@ int main(void)
 				print_frame(frame);
 			#endif
 			recorder_consume_frame(frame);
-			bot_update(master_fd, frame);
+			if (extract_score() < 10)
+				bot_update(master_fd, frame);
 		}
 	}
 
