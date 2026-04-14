@@ -144,8 +144,26 @@ static void print_frame(char frame[H][W])
 }
 #endif
 
+static void seed_srand(void)
+{
+	int fd = open("/dev/urandom", O_RDONLY);
+	if (fd < 0)
+		return;
+
+	unsigned int seed;
+	ssize_t r = read(fd, &seed, sizeof(seed));
+	close(fd);
+
+	if (r != sizeof(seed))
+		return;
+
+	srand(seed);
+}
+
 int main(void)
 {
+	seed_srand();
+
 	int master_fd;
 	pid_t pid;
 
