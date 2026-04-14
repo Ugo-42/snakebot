@@ -13,7 +13,7 @@ OBJS = $(addprefix $(OBJ_DIR)/, $(OBJ))
 
 CC = cc
 CFLAGS = -D_GNU_SOURCE -Wall -Wextra -Werror -O2 -I$(INC_DIR)
-LIBS = -lX11 -lXtst
+LIBS = -lX11 -lXtst -lm
 
 ifdef UBUNTU
 CFLAGS += -DUBUNTU

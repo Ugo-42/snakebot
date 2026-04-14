@@ -75,6 +75,7 @@ static int extract_score(void)
 	return -1;
 }
 
+#define TARGET_SCORE 990
 static void handle_prompts(int fd)
 {
 	if (state == ST_MENU && memmem(history, hlen, "(y/n)", 5))
@@ -93,11 +94,17 @@ static void handle_prompts(int fd)
 	else if (state == ST_GAME && memmem(history, hlen, "GAME OVER", 9))
 	{
 		state = ST_DEAD;
-		if (extract_score() >= 900)
+		if (extract_score() >= TARGET_SCORE)
+		{
 			write(fd, "Bob\n", 4);
-		else
-			write(fd, "\n", 1);
-		write(fd, "n\n", 2);
+			write(fd, "n\n", 2);
+			return ;
+		}
+
+		write(fd, "\n", 1);
+		write(fd, "y\n", 2);
+
+		state = ST_GAME;
 	}
 }
 
@@ -183,8 +190,7 @@ int main(void)
 				print_frame(frame);
 			#endif
 			recorder_consume_frame(frame);
-			if (extract_score() < 10)
-				bot_update(master_fd, frame);
+			bot_update(master_fd, frame);
 		}
 	}
 
