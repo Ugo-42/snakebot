@@ -1,218 +1,85 @@
 #include "recorder.h"
 #include <unistd.h>
-#include <string.h>
-#include <limits.h>
-#include <math.h>
 #include <stdlib.h>
+#include <math.h>
 
-typedef struct {
-	int dx;
-	int dy;
-	char cmd;
-} dir_t;
+#define REACTION_TIME_FRAMES 5
+#define ABS(x) ((x) < 0 ? -(x) : (x))
 
-static dir_t g_dir[4] = {
-	{0, -1, 'w'},
-	{0,  1, 's'},
-	{-1, 0, 'a'},
-	{1,  0, 'd'}
-};
+static vec_t known_apple = {-1, -1};
+static int frames_since_apple_spawn = 0;
 
-/* ============================================================
-   BASIC VALIDATION
-   ============================================================ */
-
-static int in_bounds(int x, int y)
+static int get_free_space(char map[H][W], int y, int x, int visited[H][W])
 {
-	return (x >= 0 && y >= 0 && x < W && y < H);
-}
-
-static int is_blocked(char c)
-{
-	return (c == '#' || c == '%');
-}
-
-static int is_valid(char map[H][W], int x, int y)
-{
-	if (!in_bounds(x, y))
+	if (y < 0 || y >= H || x < 0 || x >= W || 
+			map[y][x] == '#' || map[y][x] == '%' || visited[y][x])
 		return 0;
-	return !is_blocked(map[y][x]);
+
+	visited[y][x] = 1;
+	return 1 + get_free_space(map, y + 1, x, visited) +
+		get_free_space(map, y - 1, x, visited) +
+		get_free_space(map, y, x + 1, visited) +
+		get_free_space(map, y, x - 1, visited);
 }
 
-/* ============================================================
-   DISTANCE
-   ============================================================ */
-
-static int manhattan(int x1, int y1, int x2, int y2)
+static void send_move(int fd, char move)
 {
-	return (x1 > x2 ? x1 - x2 : x2 - x1)
-		+ (y1 > y2 ? y1 - y2 : y2 - y1);
+	write(fd, &move, 1);
 }
 
-/* ============================================================
-   LOCAL FREEDOM
-   ============================================================ */
-
-static int local_space(char map[H][W], int sx, int sy)
+static void best_move(int fd, char map[H][W], vec_t head, vec_t real_apple)
 {
-	vec_t stack[64];
-	char visited[H][W];
-	int size = 0;
-
-	memset(visited, 0, sizeof(visited));
-
-	stack[size++] = (vec_t){sx, sy};
-	visited[sy][sx] = 1;
-
-	int count = 0;
-
-	while (size > 0 && count < 30)
+	if (real_apple.x != known_apple.x || real_apple.y != known_apple.y)
 	{
-		vec_t cur = stack[--size];
-		count++;
-
-		for (int i = 0; i < 4; i++)
+		if (frames_since_apple_spawn >= REACTION_TIME_FRAMES) {
+			known_apple = real_apple;
+		}
+		else
 		{
-			int nx = cur.x + g_dir[i].dx;
-			int ny = cur.y + g_dir[i].dy;
+			frames_since_apple_spawn++;
+		}
+	}
+	else
+	{
+		frames_since_apple_spawn = 0; 
+	}
 
-			if (!is_valid(map, nx, ny))
-				continue;
-			if (visited[ny][nx])
-				continue;
+	int dx[] = {0, 0, -1, 1};
+	int dy[] = {-1, 1, 0, 0};
+	char keys[] = {'w', 's', 'a', 'd'};
 
-			visited[ny][nx] = 1;
-			stack[size++] = (vec_t){nx, ny};
+	int best_score = -1;
+	char final_move = 'w';
+
+	for (int i = 0; i < 4; i++)
+	{
+		int nx = head.x + dx[i];
+		int ny = head.y + dy[i];
+
+		if (ny < 0 || ny >= H || nx < 0 || nx >= W || 
+				map[ny][nx] == '#' || map[ny][nx] == '%') 
+			continue;
+
+		int visited[H][W] = {0};
+		int space = get_free_space(map, ny, nx, visited);
+
+		int dist_score = 0;
+		if (known_apple.x != -1)
+		{
+			dist_score = 1000 - (ABS(nx - known_apple.x) + ABS(ny - known_apple.y));
+		}
+
+		int total_score = (space * 10) + dist_score;
+
+		if (total_score > best_score)
+		{
+			best_score = total_score;
+			final_move = keys[i];
 		}
 	}
 
-	return count;
+	send_move(fd, final_move);
 }
-
-/* ============================================================
-   ADJACENCY
-   ============================================================ */
-
-static int adjacency_bonus(char map[H][W], int x, int y)
-{
-	int score = 0;
-
-	for (int i = 0; i < 4; i++)
-	{
-		int nx = x + g_dir[i].dx;
-		int ny = y + g_dir[i].dy;
-
-		if (!in_bounds(nx, ny))
-			continue;
-
-		char c = map[ny][nx];
-
-		if (c == '#')
-			score += 2;
-		if (c == '%' || c == '^' || c == 'v' || c == '<' || c == '>')
-			score += 3;
-	}
-
-	return score;
-}
-
-/* ============================================================
-   MOVE SCORING 
-   ============================================================ */
-
-static int score_move(char map[H][W], vec_t head, vec_t apple, vec_t next)
-{
-	int old_dist = manhattan(head.x, head.y, apple.x, apple.y);
-	int new_dist = manhattan(next.x, next.y, apple.x, apple.y);
-
-	int score = 0;
-
-	score += (old_dist - new_dist) * 10;
-	score += adjacency_bonus(map, next.x, next.y) * 5;
-
-	int space = local_space(map, next.x, next.y);
-	score += space * 2;
-
-	if (space < 10)
-		score -= 50;
-
-	return score;
-}
-
-/* ============================================================
-   SOFTMAX SELECTION
-   ============================================================ */
-
-static char softmax_pick(int scores[4], char cmds[4])
-{
-	double max = -1e9;
-
-	for (int i = 0; i < 4; i++)
-		if (scores[i] > max)
-			max = scores[i];
-
-	double sum = 0.0;
-	double prob[4];
-
-	double temperature = 4.0;
-
-	for (int i = 0; i < 4; i++)
-	{
-		prob[i] = exp((scores[i] - max) / temperature);
-		sum += prob[i];
-	}
-
-	for (int i = 0; i < 4; i++)
-		prob[i] /= sum;
-
-	double r = (double)rand() / (double)RAND_MAX;
-
-	double acc = 0.0;
-	for (int i = 0; i < 4; i++)
-	{
-		acc += prob[i];
-		if (r <= acc)
-			return cmds[i];
-	}
-
-	return cmds[3];
-}
-
-/* ============================================================
-   DECISION LOOP
-   ============================================================ */
-
-static int best_move(int fd, char map[H][W], vec_t head, vec_t apple)
-{
-	int scores[4];
-	char cmds[4];
-
-	for (int i = 0; i < 4; i++)
-	{
-		int nx = head.x + g_dir[i].dx;
-		int ny = head.y + g_dir[i].dy;
-
-		cmds[i] = g_dir[i].cmd;
-
-		if (!is_valid(map, nx, ny))
-		{
-			scores[i] = -100000;
-			continue;
-		}
-
-		vec_t next = {nx, ny};
-		scores[i] = score_move(map, head, apple, next);
-	}
-
-	char chosen = softmax_pick(scores, cmds);
-
-	write(fd, &chosen, 1);
-	return 1;
-}
-
-/* ============================================================
-   MAIN BOT ENTRY
-   ============================================================ */
 
 void bot_update(int fd, char map[H][W])
 {
